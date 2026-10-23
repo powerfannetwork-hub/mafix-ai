@@ -1,0 +1,35 @@
+import 'package:flutter/material.dart';
+import 'screens/home_screen.dart';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MafixAIApp());
+}
+
+class MafixAIApp extends StatelessWidget {
+  const MafixAIApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    const navy = Color(0xFF0C102A);
+    const panel = Color(0xFF171D42);
+    const purple = Color(0xFF6C63FF);
+    const cyan = Color(0xFF39DDFF);
+    return MaterialApp(
+      title: 'Mafix AI',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: navy,
+        colorScheme: const ColorScheme.dark(primary: purple, secondary: cyan, surface: panel),
+        appBarTheme: const AppBarTheme(backgroundColor: navy, foregroundColor: Colors.white, elevation: 0),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true, fillColor: panel,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
+        ),
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
