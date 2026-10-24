@@ -1,0 +1,74 @@
+name: Build Mafix AI APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Check Flutter
+        run: flutter --version
+
+      - name: Generate Android project files
+        run: flutter create --platforms=android .
+
+      - name: Add Android internet permission
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          content = manifest.read_text()
+
+          permission = '<uses-permission android:name="android.permission.INTERNET"/>'
+
+          if "android.permission.INTERNET" not in content:
+              content = re.sub(
+                  r'(<manifest\b[^>]*>)',
+                  r'\1\n    ' + permission,
+                  content,
+                  count=1
+              )
+
+          manifest.write_text(content)
+          print("Internet permission is present.")
+          PY
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload Mafix AI APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mafix-AI-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
