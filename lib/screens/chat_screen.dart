@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 class ChatScreen extends StatefulWidget {
   final String mode;
@@ -18,6 +20,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<_ChatMessage> _messages = [];
 
+  static const String _backendUrl =
+      'https://mafix-ai-backend.idrisattijani9.workers.dev/chat';
+
+  bool _isLoading = false;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -25,20 +32,97 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     final text = _controller.text.trim();
 
-    if (text.isEmpty) return;
+    if (text.isEmpty || _isLoading) return;
 
     setState(() {
-      _messages.add(
-        _ChatMessage(text: text, isUser: true),
-      );
+      _messages.add(_ChatMessage(text: text, isUser: true));
       _controller.clear();
+      _isLoading = true;
     });
 
     FocusScope.of(context).unfocus();
+    _scrollToBottom();
 
+    try {
+      final history = _messages
+          .where((message) => message.text.isNotEmpty)
+          .toList();
+
+      // Saƙon ƙarshe shi ne sabon saƙon user.
+      // An tura tsoffin saƙonni a matsayin history.
+      final previousMessages = history.length > 1
+          ? history.sublist(0, history.length - 1)
+          : <_ChatMessage>[];
+
+      final response = await http
+          .post(
+            Uri.parse(_backendUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'message': text,
+              'history': previousMessages.map((message) {
+                return {
+                  'role': message.isUser ? 'user' : 'model',
+                  'text': message.text,
+                };
+              }).toList(),
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          data is Map && data['error'] is String
+              ? data['error']
+              : 'An samu matsala wajen amsa saƙonka.',
+        );
+      }
+
+      if (data is! Map || data['reply'] is! String) {
+        throw Exception('An samu amsa marar inganci daga sabar.');
+      }
+
+      final reply = (data['reply'] as String).trim();
+
+      if (reply.isEmpty) {
+        throw Exception('AI bai dawo da amsa ba. Sake gwadawa.');
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _messages.add(_ChatMessage(text: reply, isUser: false));
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      final errorText = error.toString().replaceFirst('Exception: ', '');
+
+      setState(() {
+        _messages.add(
+          _ChatMessage(
+            text: 'Yi haƙuri, an samu matsala: $errorText',
+            isUser: false,
+            isError: true,
+          ),
+        );
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        _scrollToBottom();
+      }
+    }
+  }
+
+  void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -89,10 +173,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Icon(
-                Icons.auto_awesome,
-                color: Colors.white,
-              ),
+              child: const Icon(Icons.auto_awesome, color: Colors.white),
             ),
             const SizedBox(width: 12),
             const Expanded(
@@ -121,11 +202,13 @@ class _ChatScreenState extends State<ChatScreen> {
         actions: [
           IconButton(
             tooltip: 'New chat',
-            onPressed: () {
-              setState(() {
-                _messages.clear();
-              });
-            },
+            onPressed: _isLoading
+                ? null
+                : () {
+                    setState(() {
+                      _messages.clear();
+                    });
+                  },
             icon: const Icon(Icons.add_comment_outlined),
           ),
         ],
@@ -219,8 +302,34 @@ class _ChatScreenState extends State<ChatScreen> {
                   : ListView.builder(
                       controller: _scrollController,
                       padding: const EdgeInsets.all(16),
-                      itemCount: _messages.length,
+                      itemCount: _messages.length + (_isLoading ? 1 : 0),
                       itemBuilder: (context, index) {
+                        if (_isLoading && index == _messages.length) {
+                          return const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: EdgeInsets.all(12),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                  SizedBox(width: 12),
+                                  Text(
+                                    'Mafix AI yana tunani...',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+
                         final message = _messages[index];
 
                         return Align(
@@ -243,16 +352,20 @@ class _ChatScreenState extends State<ChatScreen> {
                                   : const Color(0xFF171D42),
                               borderRadius: BorderRadius.circular(20),
                             ),
-                            child: Text(
+                            child: SelectableText(
                               message.text,
-                              style: const TextStyle(height: 1.45),
+                              style: TextStyle(
+                                height: 1.45,
+                                color: message.isError
+                                    ? Colors.orangeAccent
+                                    : Colors.white,
+                              ),
                             ),
                           ),
                         );
                       },
                     ),
             ),
-
             Container(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               decoration: const BoxDecoration(
@@ -269,10 +382,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     onPressed: () {
                       _showNotice(
                         'Live Camera',
-                        'The camera interface is planned. '
-                        'We still need to connect camera permissions '
-                        'and an AI service that can understand images '
-                        'or live video.',
+                        'Ba a haɗa camera da AI ba tukuna.',
                       );
                     },
                     icon: const Icon(
@@ -309,9 +419,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     onPressed: () {
                       _showNotice(
                         'Talk to Mafix AI',
-                        'Voice input is planned. We need to connect '
-                        'speech recognition and an AI service before '
-                        'this button can listen and respond.',
+                        'Ba a haɗa voice da AI ba tukuna.',
                       );
                     },
                     icon: const Icon(
@@ -322,7 +430,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   IconButton.filled(
                     tooltip: 'Send message',
-                    onPressed: _sendMessage,
+                    onPressed: _isLoading ? null : _sendMessage,
                     style: IconButton.styleFrom(
                       backgroundColor: const Color(0xFF6C63FF),
                       foregroundColor: Colors.white,
@@ -342,10 +450,12 @@ class _ChatScreenState extends State<ChatScreen> {
 class _ChatMessage {
   final String text;
   final bool isUser;
+  final bool isError;
 
   const _ChatMessage({
     required this.text,
     required this.isUser,
+    this.isError = false,
   });
 }
 
