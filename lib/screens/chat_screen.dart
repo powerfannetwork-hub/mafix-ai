@@ -51,8 +51,6 @@ class _ChatScreenState extends State<ChatScreen> {
           .where((message) => message.text.isNotEmpty)
           .toList();
 
-      // Saƙon ƙarshe shi ne sabon saƙon user.
-      // An tura tsoffin saƙonni a matsayin history.
       final previousMessages = history.length > 1
           ? history.sublist(0, history.length - 1)
           : <_ChatMessage>[];
@@ -60,7 +58,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final response = await http
           .post(
             Uri.parse(_backendUrl),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+            },
             body: jsonEncode({
               'message': text,
               'history': previousMessages.map((message) {
@@ -73,40 +73,39 @@ class _ChatScreenState extends State<ChatScreen> {
           )
           .timeout(const Duration(seconds: 60));
 
-      final data = jsonDecode(response.body);
+      final dynamic data = jsonDecode(response.body);
 
       if (response.statusCode != 200) {
-        throw Exception(
-          data is Map && data['error'] is String
-              ? data['error']
-              : 'An samu matsala wajen amsa saƙonka.',
-        );
+        throw Exception('Request failed');
       }
 
       if (data is! Map || data['reply'] is! String) {
-        throw Exception('An samu amsa marar inganci daga sabar.');
+        throw Exception('Invalid response');
       }
 
       final reply = (data['reply'] as String).trim();
 
       if (reply.isEmpty) {
-        throw Exception('AI bai dawo da amsa ba. Sake gwadawa.');
+        throw Exception('Empty response');
       }
 
       if (!mounted) return;
 
       setState(() {
-        _messages.add(_ChatMessage(text: reply, isUser: false));
+        _messages.add(
+          _ChatMessage(
+            text: reply,
+            isUser: false,
+          ),
+        );
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
-
-      final errorText = error.toString().replaceFirst('Exception: ', '');
 
       setState(() {
         _messages.add(
-          _ChatMessage(
-            text: 'Yi haƙuri, an samu matsala: $errorText',
+          const _ChatMessage(
+            text: 'Sorry, something went wrong while connecting to Mafix AI. Please try again later.',
             isUser: false,
             isError: true,
           ),
@@ -117,6 +116,7 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _isLoading = false;
         });
+
         _scrollToBottom();
       }
     }
@@ -139,7 +139,10 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF171D42),
-        title: Text(title, style: const TextStyle(color: Colors.white)),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white),
+        ),
         content: Text(
           message,
           style: const TextStyle(color: Colors.white70),
@@ -173,7 +176,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Icon(Icons.auto_awesome, color: Colors.white),
+              child: const Icon(
+                Icons.auto_awesome,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(width: 12),
             const Expanded(
@@ -321,8 +327,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                   ),
                                   SizedBox(width: 12),
                                   Text(
-                                    'Mafix AI yana tunani...',
-                                    style: TextStyle(color: Colors.white70),
+                                    'Mafix AI is thinking...',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -382,7 +390,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     onPressed: () {
                       _showNotice(
                         'Live Camera',
-                        'Ba a haɗa camera da AI ba tukuna.',
+                        'Camera is not connected to AI yet.',
                       );
                     },
                     icon: const Icon(
@@ -419,7 +427,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     onPressed: () {
                       _showNotice(
                         'Talk to Mafix AI',
-                        'Ba a haɗa voice da AI ba tukuna.',
+                        'Voice chat is not connected to AI yet.',
                       );
                     },
                     icon: const Icon(
