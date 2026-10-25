@@ -20,8 +20,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<_ChatMessage> _messages = [];
 
+  // Correct Cloudflare Worker URL.
   static const String _backendUrl =
-      'https://mafix-ai-backend.idrisattijani9.workers.dev/chat';
+      'https://mafix-ai-backend.idrisatijjani9.workers.dev/chat';
 
   bool _isLoading = false;
 
@@ -47,12 +48,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
 
     try {
-      final history = _messages
-          .where((message) => message.text.isNotEmpty)
-          .toList();
-
-      final previousMessages = history.length > 1
-          ? history.sublist(0, history.length - 1)
+      final previousMessages = _messages.length > 1
+          ? _messages.sublist(0, _messages.length - 1)
           : <_ChatMessage>[];
 
       final response = await http
@@ -60,6 +57,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Uri.parse(_backendUrl),
             headers: {
               'Content-Type': 'application/json',
+              'Accept': 'application/json',
             },
             body: jsonEncode({
               'message': text,
@@ -73,20 +71,38 @@ class _ChatScreenState extends State<ChatScreen> {
           )
           .timeout(const Duration(seconds: 60));
 
-      final dynamic data = jsonDecode(response.body);
+      dynamic data;
+
+      try {
+        data = jsonDecode(response.body);
+      } on FormatException {
+        throw Exception(
+          'Backend returned an invalid response '
+          '(HTTP ${response.statusCode}).',
+        );
+      }
 
       if (response.statusCode != 200) {
-        throw Exception('Request failed');
+        final errorMessage = data is Map
+            ? (data['error'] ?? data['message'] ?? 'Unknown server error')
+                .toString()
+            : 'Unknown server error';
+
+        throw Exception(
+          'HTTP ${response.statusCode}: $errorMessage',
+        );
       }
 
       if (data is! Map || data['reply'] is! String) {
-        throw Exception('Invalid response');
+        throw Exception(
+          'The backend response does not contain a valid reply.',
+        );
       }
 
       final reply = (data['reply'] as String).trim();
 
       if (reply.isEmpty) {
-        throw Exception('Empty response');
+        throw Exception('The AI returned an empty response.');
       }
 
       if (!mounted) return;
@@ -99,18 +115,10 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         );
       });
-    } catch (_) {
-      if (!mounted) return;
-
-      setState(() {
-        _messages.add(
-          const _ChatMessage(
-            text: 'Sorry, something went wrong while connecting to Mafix AI. Please try again later.',
-            isUser: false,
-            isError: true,
-          ),
-        );
-      });
+    } on http.ClientException catch (e) {
+      _showChatError('Network error: ${e.message}');
+    } catch (e) {
+      _showChatError(e.toString());
     } finally {
       if (mounted) {
         setState(() {
@@ -120,6 +128,21 @@ class _ChatScreenState extends State<ChatScreen> {
         _scrollToBottom();
       }
     }
+  }
+
+  void _showChatError(String error) {
+    if (!mounted) return;
+
+    // Show the real error to help diagnose the backend.
+    setState(() {
+      _messages.add(
+        _ChatMessage(
+          text: 'Mafix AI error:\n$error',
+          isUser: false,
+          isError: true,
+        ),
+      );
+    });
   }
 
   void _scrollToBottom() {
