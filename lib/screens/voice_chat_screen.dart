@@ -405,17 +405,16 @@ ScaffoldMessenger.of(context).showSnackBar(
 
 }
 
-void scrollToBottom() {
-WidgetsBinding.instance.addPostFrameCallback(() {
-if (!_scrollController.hasClients) return;
+void _scrollToBottom() {
+  WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+    if (!_scrollController.hasClients) return;
 
-  _scrollController.animateTo(
-    _scrollController.position.maxScrollExtent,
-    duration: const Duration(milliseconds: 250),
-    curve: Curves.easeOut,
-  );
-});
-
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  });
 }
 
 Future<void> _sendTypedMessage() async {
