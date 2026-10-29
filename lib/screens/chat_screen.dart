@@ -1,6 +1,9 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'auth_screen.dart';
 import 'subscription_screen.dart';
 import 'chat_history_screen.dart';
@@ -26,11 +29,26 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<_ChatMessage> _messages = [];
 
-  // Correct Cloudflare Worker URL.
   static const String _backendUrl =
       'https://mafix-ai-backend.idrisatijjani9.workers.dev/chat';
 
+  static const String _historyKey = 'mafix_ai_chat_history_v1';
+
   bool _isLoading = false;
+  bool _isSaving = false;
+
+  String _conversationId = '';
+  DateTime _conversationCreated = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+
+    _conversationId =
+        DateTime.now().microsecondsSinceEpoch.toString();
+
+    _restoreLastConversation();
+  }
 
   @override
   void dispose() {
@@ -39,13 +57,185 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  Future<SharedPreferences> get _preferences async {
+    return SharedPreferences.getInstance();
+  }
+
+  Map<String, dynamic> _conversationToJson() {
+    return {
+      'id': _conversationId,
+      'title': _messages.isNotEmpty
+          ? _messages.first.text
+          : 'New chat',
+      'createdAt': _conversationCreated.toIso8601String(),
+      'updatedAt': DateTime.now().toIso8601String(),
+      'messages': _messages
+          .where((message) => !message.isError)
+          .map((message) => {
+                'text': message.text,
+                'isUser': message.isUser,
+              })
+          .toList(),
+    };
+  }
+
+  Future<void> _saveConversation() async {
+    if (_messages.isEmpty || _isSaving) return;
+
+    _isSaving = true;
+
+    try {
+      final prefs = await _preferences;
+
+      final raw = prefs.getString(_historyKey);
+      List<dynamic> conversations = [];
+
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) {
+            conversations = decoded;
+          }
+        } catch (_) {
+          conversations = [];
+        }
+      }
+
+      final current = _conversationToJson();
+
+      final index = conversations.indexWhere(
+        (item) =>
+            item is Map &&
+            item['id']?.toString() == _conversationId,
+      );
+
+      if (index >= 0) {
+        conversations[index] = current;
+      } else {
+        conversations.insert(0, current);
+      }
+
+      conversations.sort((a, b) {
+        final dateA = a is Map
+            ? DateTime.tryParse(a['updatedAt']?.toString() ?? '')
+            : null;
+        final dateB = b is Map
+            ? DateTime.tryParse(b['updatedAt']?.toString() ?? '')
+            : null;
+
+        return (dateB ?? DateTime(2000))
+            .compareTo(dateA ?? DateTime(2000));
+      });
+
+      // Keep a maximum of 100 conversations on this device.
+      if (conversations.length > 100) {
+        conversations = conversations.take(100).toList();
+      }
+
+      await prefs.setString(
+        _historyKey,
+        jsonEncode(conversations),
+      );
+    } catch (e) {
+      debugPrint('Could not save Mafix AI conversation: $e');
+    } finally {
+      _isSaving = false;
+    }
+  }
+
+  Future<void> _restoreLastConversation() async {
+    try {
+      final prefs = await _preferences;
+      final raw = prefs.getString(_historyKey);
+
+      if (raw == null || raw.isEmpty) return;
+
+      final decoded = jsonDecode(raw);
+
+      if (decoded is! List || decoded.isEmpty) return;
+
+      final conversation = decoded.first;
+
+      if (conversation is! Map) return;
+
+      final storedMessages = conversation['messages'];
+
+      if (storedMessages is! List || storedMessages.isEmpty) return;
+
+      final restored = <_ChatMessage>[];
+
+      for (final item in storedMessages) {
+        if (item is! Map) continue;
+
+        final text = item['text']?.toString() ?? '';
+
+        if (text.trim().isEmpty) continue;
+
+        restored.add(
+          _ChatMessage(
+            text: text,
+            isUser: item['isUser'] == true,
+          ),
+        );
+      }
+
+      if (!mounted || _messages.isNotEmpty || restored.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _messages.addAll(restored);
+
+        _conversationId =
+            conversation['id']?.toString() ?? _conversationId;
+
+        _conversationCreated = DateTime.tryParse(
+              conversation['createdAt']?.toString() ?? '',
+            ) ??
+            DateTime.now();
+      });
+
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint('Could not restore Mafix AI conversation: $e');
+    }
+  }
+
+  Future<void> _startNewChat() async {
+    if (_isLoading) return;
+
+    await _saveConversation();
+
+    if (!mounted) return;
+
+    setState(() {
+      _messages.clear();
+      _controller.clear();
+
+      _conversationId =
+          DateTime.now().microsecondsSinceEpoch.toString();
+
+      _conversationCreated = DateTime.now();
+    });
+
+    FocusScope.of(context).unfocus();
+  }
+
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
 
     if (text.isEmpty || _isLoading) return;
 
+    final previousMessages = List<_ChatMessage>.from(_messages);
+
     setState(() {
-      _messages.add(_ChatMessage(text: text, isUser: true));
+      _messages.add(
+        _ChatMessage(
+          text: text,
+          isUser: true,
+        ),
+      );
+
       _controller.clear();
       _isLoading = true;
     });
@@ -54,10 +244,6 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
 
     try {
-      final previousMessages = _messages.length > 1
-          ? _messages.sublist(0, _messages.length - 1)
-          : <_ChatMessage>[];
-
       final response = await http
           .post(
             Uri.parse(_backendUrl),
@@ -67,7 +253,9 @@ class _ChatScreenState extends State<ChatScreen> {
             },
             body: jsonEncode({
               'message': text,
-              'history': previousMessages.map((message) {
+              'history': previousMessages
+                  .where((message) => !message.isError)
+                  .map((message) {
                 return {
                   'role': message.isUser ? 'user' : 'model',
                   'text': message.text,
@@ -90,7 +278,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (response.statusCode != 200) {
         final errorMessage = data is Map
-            ? (data['error'] ?? data['message'] ?? 'Unknown server error')
+            ? (data['error'] ??
+                    data['message'] ??
+                    'Unknown server error')
                 .toString()
             : 'Unknown server error';
 
@@ -121,6 +311,8 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         );
       });
+
+      await _saveConversation();
     } on http.ClientException catch (e) {
       _showChatError('Network error: ${e.message}');
     } catch (e) {
@@ -139,7 +331,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void _showChatError(String error) {
     if (!mounted) return;
 
-    // Show the real error to help diagnose the backend.
     setState(() {
       _messages.add(
         _ChatMessage(
@@ -153,20 +344,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scrollController.hasClients) return;
+
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     });
   }
 
   void _showNotice(String title, String message) {
     showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF171D42),
         title: Text(
           title,
@@ -178,7 +369,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('OK'),
           ),
         ],
@@ -189,7 +380,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildDrawer(BuildContext context) {
     void go(Widget page) {
       Navigator.pop(context);
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => page),
+      );
     }
 
     return Drawer(
@@ -200,31 +393,103 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 18, 20, 20),
-              child: Row(children: [
-                CircleAvatar(backgroundColor: Color(0xFF6C63FF), child: Icon(Icons.auto_awesome, color: Colors.white)),
-                SizedBox(width: 12),
-                Text('Mafix AI', style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
-              ]),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: Color(0xFF6C63FF),
+                    child: Icon(
+                      Icons.auto_awesome,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(width: 12),
+                  Text(
+                    'Mafix AI',
+                    style: TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: OutlinedButton.icon(
-                onPressed: () { Navigator.pop(context); setState(() => _messages.clear()); },
-                icon: const Icon(Icons.add), label: const Align(alignment: Alignment.centerLeft, child: Text('New chat')),
-                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14), foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24)),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _startNewChat();
+                },
+                icon: const Icon(Icons.add),
+                label: const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('New chat'),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white24),
+                ),
               ),
             ),
             const SizedBox(height: 12),
-            const Padding(padding: EdgeInsets.fromLTRB(18, 8, 18, 4), child: Text('YOUR SPACE', style: TextStyle(color: Colors.white54, fontSize: 11, letterSpacing: 1.2))),
-            ListTile(leading: const Icon(Icons.forum_outlined), title: const Text('Chat history'), onTap: () => go(const ChatHistoryScreen())),
-            ListTile(leading: const Icon(Icons.graphic_eq_rounded), title: const Text('Voice conversation'), onTap: () => go(const VoiceChatScreen())),
-            ListTile(leading: const Icon(Icons.person_outline), title: const Text('Profile'), onTap: () => go(const ProfileScreen())),
-            ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('Settings'), onTap: () => go(const SettingsScreen())),
-            ListTile(leading: const Icon(Icons.workspace_premium_outlined), title: const Text('Upgrade to Pro'), onTap: () => go(const SubscriptionScreen())),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(18, 8, 18, 4),
+              child: Text(
+                'YOUR SPACE',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.forum_outlined),
+              title: const Text('Chat history'),
+              onTap: () => go(const ChatHistoryScreen()),
+            ),
+            ListTile(
+              leading: const Icon(Icons.graphic_eq_rounded),
+              title: const Text('Voice conversation'),
+              onTap: () => go(const VoiceChatScreen()),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Profile'),
+              onTap: () => go(const ProfileScreen()),
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Settings'),
+              onTap: () => go(const SettingsScreen()),
+            ),
+            ListTile(
+              leading: const Icon(Icons.workspace_premium_outlined),
+              title: const Text('Upgrade to Pro'),
+              onTap: () => go(const SubscriptionScreen()),
+            ),
             const Spacer(),
             const Divider(color: Colors.white12),
-            ListTile(leading: const Icon(Icons.login_rounded), title: const Text('Login / Register'), onTap: () => go(const AuthScreen())),
-            const Padding(padding: EdgeInsets.all(16), child: Text('Mafix AI • Your smart assistant', style: TextStyle(color: Colors.white38, fontSize: 12))),
+            ListTile(
+              leading: const Icon(Icons.login_rounded),
+              title: const Text('Login / Register'),
+              onTap: () => go(const AuthScreen()),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Mafix AI • Your smart assistant',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 12,
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -233,15 +498,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final hintText =
+        _messages.isEmpty ? 'Ask Mafix AI' : 'Reply to Mafix AI';
+
     return Scaffold(
       drawer: _buildDrawer(context),
       appBar: AppBar(
         elevation: 0,
-        leading: Builder(builder: (context) => IconButton(
-          tooltip: 'Open menu',
-          icon: const Icon(Icons.menu_rounded),
-          onPressed: () => Scaffold.of(context).openDrawer(),
-        )),
+        leading: Builder(
+          builder: (context) => IconButton(
+            tooltip: 'Open menu',
+            icon: const Icon(Icons.menu_rounded),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
         title: Row(
           children: [
             Container(
@@ -288,36 +558,40 @@ class _ChatScreenState extends State<ChatScreen> {
         actions: [
           IconButton(
             tooltip: 'Upgrade plan',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SubscriptionScreen())),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const SubscriptionScreen(),
+                ),
+              );
+            },
             icon: const Icon(Icons.workspace_premium_outlined),
           ),
           IconButton(
             tooltip: 'Voice conversation',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VoiceChatScreen())),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const VoiceChatScreen(),
+                ),
+              );
+            },
             icon: const Icon(Icons.graphic_eq_rounded),
           ),
           IconButton(
             tooltip: 'Account / sign out',
-            onPressed: () => showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
-              backgroundColor: const Color(0xFF171D42),
-              title: const Text('Mafix AI account'),
-              content: const Text('Account sign-in is currently a UI preview. Connect Firebase or Supabase before using real accounts.'),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-                TextButton(onPressed: () { Navigator.pop(dialogContext); Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AuthScreen()), (route) => false); }, child: const Text('Back to login')),
-              ],
-            )),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const AuthScreen(),
+                ),
+              );
+            },
             icon: const Icon(Icons.account_circle_outlined),
           ),
           IconButton(
             tooltip: 'New chat',
-            onPressed: _isLoading
-                ? null
-                : () {
-                    setState(() {
-                      _messages.clear();
-                    });
-                  },
+            onPressed: _isLoading ? null : _startNewChat,
             icon: const Icon(Icons.add_comment_outlined),
           ),
         ],
@@ -510,7 +784,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _sendMessage(),
                       decoration: InputDecoration(
-                        hintText: 'Message Mafix AI...',
+                        hintText: hintText,
                         filled: true,
                         fillColor: const Color(0xFF171D42),
                         contentPadding: const EdgeInsets.symmetric(
@@ -526,8 +800,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   const SizedBox(width: 5),
                   IconButton(
-                    tooltip: 'Voice',
-                    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VoiceChatScreen())),
+                    tooltip: 'Voice conversation',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const VoiceChatScreen(),
+                        ),
+                      );
+                    },
                     icon: const Icon(
                       Icons.mic_none,
                       color: Color(0xFF39DDFF),
