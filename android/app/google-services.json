@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "872559757006",
+    "project_id": "mafix-ai",
+    "storage_bucket": "mafix-ai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:872559757006:android:493c8ae6e2847041f2329f",
+        "android_client_info": {
+          "package_name": "com.mafixai.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCTnwYKpvtzy8qDHrItBbVt4J3ZvvBDRlk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
