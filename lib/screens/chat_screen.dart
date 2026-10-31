@@ -837,7 +837,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await FileSaver.instance.saveFile(
         name: 'mafix_ai_${DateTime.now().millisecondsSinceEpoch}',
         bytes: bytes,
-        ext: ext,
+        fileExtension: ext,
         mimeType: mime.contains('jpeg') ? MimeType.jpeg : mime.contains('webp') ? MimeType.webp : MimeType.png,
       );
       _showSnack('An adana hoton cikin na’urar ka.');
