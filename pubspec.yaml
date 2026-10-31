@@ -21,10 +21,10 @@ dependencies:
 
   image_picker: ^1.1.2
   file_picker: ^8.1.7
-  file_saver: ^0.2.14
+  file_saver: ^0.3.1
 
   web_socket_channel: ^3.0.2
-  record: ^5.2.1
+  record: ^6.2.1
   flutter_sound: ^9.16.3
   permission_handler: ^11.3.1
 
