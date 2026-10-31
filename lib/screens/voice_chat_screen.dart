@@ -80,6 +80,7 @@ await _player.openPlayer();
     sampleRate: LiveConfig.outputSampleRate,
     numChannels: 1,
     bufferSize: 8192,
+    interleaved: true,
   );
 
   _playerReady = true;
@@ -209,6 +210,7 @@ await _player.stopPlayer();
       sampleRate: LiveConfig.outputSampleRate,
       numChannels: 1,
       bufferSize: 8192,
+      interleaved: true,
     );
   }
 } catch (_) {}
