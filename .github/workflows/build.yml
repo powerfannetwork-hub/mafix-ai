@@ -63,7 +63,15 @@ jobs:
         run: flutter pub get
 
       - name: Build release APK
-        run: flutter build apk --release
+        env:
+          MAFIX_LIVE_TOKEN: ${{ secrets.LIVE_AUTH_TOKEN }}
+        run: |
+          if [ -z "$MAFIX_LIVE_TOKEN" ]; then
+            echo "ERROR: LIVE_AUTH_TOKEN secret is missing."
+            exit 1
+          fi
+
+          flutter build apk --release --dart-define=MAFIX_LIVE_TOKEN="$MAFIX_LIVE_TOKEN"
 
       - name: Upload Mafix AI APK
         uses: actions/upload-artifact@v4
