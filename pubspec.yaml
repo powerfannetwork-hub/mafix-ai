@@ -4,29 +4,29 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-sdk: '>=3.3.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
-cupertino_icons: ^1.0.8
-http: ^1.5.0
-speech_to_text: ^7.0.0
+  cupertino_icons: ^1.0.8
+  http: ^1.5.0
+  speech_to_text: ^7.0.0
   flutter_tts: ^4.2.3
 
-firebase_core: ^4.2.0
-firebase_auth: ^6.1.0
-shared_preferences: ^2.5.3
+  firebase_core: ^4.2.0
+  firebase_auth: ^6.1.0
+  shared_preferences: ^2.5.3
 
-image_picker: ^1.1.2
-file_picker: ^8.1.7
-file_saver: ^0.2.14
+  image_picker: ^1.1.2
+  file_picker: ^8.1.7
+  file_saver: ^0.2.14
 
-web_socket_channel: ^3.0.2
-record: ^5.2.1
+  web_socket_channel: ^3.0.2
+  record: ^5.2.1
   flutter_sound: ^9.16.3
-permission_handler: ^11.3.1
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
@@ -34,7 +34,7 @@ dev_dependencies:
   flutter_lints: ^4.0.0
 
 flutter:
-uses-material-design: true
+  uses-material-design: true
 
-assets:
-- assets/icon/mafix_ai_icon.png
+  assets:
+    - assets/icon/mafix_ai_icon.png
