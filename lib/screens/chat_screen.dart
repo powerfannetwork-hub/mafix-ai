@@ -37,9 +37,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<_ChatMessage> _messages = [];
 
-  static const String _streamUrl =
-      'https://mafix-ai-backend.idrisatijjani9.workers.dev/chat/stream';
+  static const String _baseUrl =
+      'https://mafix-ai-backend.idrisatijjani9.workers.dev';
 
+  static const String _streamUrl = '$_baseUrl/chat/stream';
   static const String _historyKey = 'mafix_ai_chat_history_v1';
 
   String _conversationId = '';
@@ -48,19 +49,27 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isLoading = false;
   bool _isSaving = false;
   bool _isListening = false;
+  bool _speechReady = false;
+  bool _manuallyStopped = false;
+
   String _generationStatus = 'thinking';
   late String _selectedMode;
+
   String _activeRequestId = '';
+
   http.Client? _streamClient;
+
   final stt.SpeechToText _speech = stt.SpeechToText();
   final FlutterTts _tts = FlutterTts();
-  bool _speechReady = false;
   final ImagePicker _imagePicker = ImagePicker();
+
   String? _attachmentName;
   String? _attachmentMime;
   String? _attachmentBase64;
   String? _attachmentText;
+
   Uint8List? _attachmentPreviewBytes;
+
   bool _attachmentIsVideo = false;
   String _attachmentAction = 'analyze';
 
@@ -70,9 +79,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _conversationId =
         DateTime.now().microsecondsSinceEpoch.toString();
+
     _selectedMode = _normalizeMode(widget.mode);
 
     _controller.addListener(_onComposerChanged);
+
     _initializeSpeech();
     _restoreLastConversation();
   }
@@ -82,9 +93,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _controller.removeListener(_onComposerChanged);
     _controller.dispose();
     _scrollController.dispose();
+
     _streamClient?.close();
+
     _speech.cancel();
     _tts.stop();
+
     super.dispose();
   }
 
@@ -94,7 +108,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _openVoiceConversation() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const VoiceChatScreen()),
+      MaterialPageRoute(
+        builder: (_) => const VoiceChatScreen(),
+      ),
     );
   }
 
@@ -102,9 +118,8 @@ class _ChatScreenState extends State<ChatScreen> {
     return SharedPreferences.getInstance();
   }
 
-  // FIX: Scroll to the latest message after the frame is rendered.
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
 
       _scrollController.animateTo(
@@ -145,14 +160,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _saveConversation() async {
     final prefs = await _prefs;
-    final saveHistory = prefs.getBool('mafix_save_chat_history') ?? true;
+
+    final saveHistory =
+        prefs.getBool('mafix_save_chat_history') ?? true;
+
     if (!saveHistory) return;
 
-    if (_messages.where((message) => !message.isError).isEmpty) {
-      return;
-    }
+    if (_messages.where((m) => !m.isError).isEmpty) return;
 
-    // Wait for an earlier save to finish.
     while (_isSaving) {
       await Future<void>.delayed(
         const Duration(milliseconds: 50),
@@ -169,6 +184,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (raw != null && raw.isNotEmpty) {
         try {
           final decoded = jsonDecode(raw);
+
           if (decoded is List) {
             conversations = decoded;
           }
@@ -226,16 +242,22 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _restoreLastConversation() async {
     try {
       final prefs = await _prefs;
-      final saveHistory = prefs.getBool('mafix_save_chat_history') ?? true;
+
+      final saveHistory =
+          prefs.getBool('mafix_save_chat_history') ?? true;
+
       if (!saveHistory) return;
+
       final raw = prefs.getString(_historyKey);
 
       if (raw == null || raw.isEmpty) return;
 
       final decoded = jsonDecode(raw);
+
       if (decoded is! List || decoded.isEmpty) return;
 
       final conversation = decoded.first;
+
       if (conversation is! Map) return;
 
       await _loadConversationData(conversation);
@@ -354,8 +376,10 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_conversationId == item.id && mounted) {
         setState(() {
           _messages.clear();
+
           _conversationId =
               DateTime.now().microsecondsSinceEpoch.toString();
+
           _conversationCreated = DateTime.now();
         });
       }
@@ -390,13 +414,16 @@ class _ChatScreenState extends State<ChatScreen> {
       _speechReady = await _speech.initialize(
         onStatus: (status) {
           if (!mounted) return;
+
           if (status == 'done' || status == 'notListening') {
             setState(() => _isListening = false);
           }
         },
         onError: (error) {
           if (!mounted) return;
+
           setState(() => _isListening = false);
+
           _showSnack('Microphone: ${error.errorMsg}');
         },
       );
@@ -408,19 +435,32 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _toggleSpeechToText() async {
     if (_isListening) {
       await _speech.stop();
-      if (mounted) setState(() => _isListening = false);
+
+      if (mounted) {
+        setState(() => _isListening = false);
+      }
+
       return;
     }
-    if (!_speechReady) await _initializeSpeech();
+
     if (!_speechReady) {
-      _showSnack('Speech recognition is unavailable. Check microphone permission.');
+      await _initializeSpeech();
+    }
+
+    if (!_speechReady) {
+      _showSnack(
+        'Speech recognition is unavailable. Check microphone permission.',
+      );
       return;
     }
+
     await _speech.listen(
       onResult: (result) {
         if (!mounted) return;
+
         setState(() {
           _controller.text = result.recognizedWords;
+
           _controller.selection = TextSelection.collapsed(
             offset: _controller.text.length,
           );
@@ -429,26 +469,40 @@ class _ChatScreenState extends State<ChatScreen> {
       listenFor: const Duration(seconds: 60),
       pauseFor: const Duration(seconds: 4),
     );
-    if (mounted) setState(() => _isListening = true);
+
+    if (mounted) {
+      setState(() => _isListening = true);
+    }
   }
 
   Future<void> _stopGeneration() async {
     final id = _activeRequestId;
+
+    _manuallyStopped = true;
+
     _streamClient?.close();
     _streamClient = null;
+
     if (id.isNotEmpty) {
       try {
         await http.post(
-          Uri.parse('https://mafix-ai-backend.idrisatijjani9.workers.dev/stop'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'request_id': id}),
+          Uri.parse('$_baseUrl/stop'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'request_id': id,
+          }),
         ).timeout(const Duration(seconds: 4));
       } catch (_) {}
     }
+
     if (!mounted) return;
+
     setState(() {
       _isLoading = false;
       _generationStatus = 'stopped';
+      _activeRequestId = '';
     });
   }
 
@@ -459,14 +513,24 @@ class _ChatScreenState extends State<ChatScreen> {
         imageQuality: 85,
         maxWidth: 2048,
       );
+
       if (image == null) return;
+
       final bytes = await image.readAsBytes();
+
       if (bytes.length > 8 * 1024 * 1024) {
         _showSnack('Please choose an image smaller than 8 MB.');
         return;
       }
+
       final ext = image.name.toLowerCase().split('.').last;
-      final mime = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+
+      final mime = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+
       setState(() {
         _attachmentName = image.name;
         _attachmentMime = mime;
@@ -488,18 +552,26 @@ class _ChatScreenState extends State<ChatScreen> {
         allowedExtensions: ['pdf', 'txt', 'md', 'csv'],
         withData: true,
       );
+
       if (result == null || result.files.isEmpty) return;
+
       final file = result.files.single;
       final bytes = file.bytes;
+
       if (bytes == null) {
-        _showSnack('Could not read the selected file. Please try again.');
+        _showSnack(
+          'Could not read the selected file. Please try again.',
+        );
         return;
       }
+
       if (bytes.length > 8 * 1024 * 1024) {
         _showSnack('Please choose a file smaller than 8 MB.');
         return;
       }
+
       final ext = (file.extension ?? '').toLowerCase();
+
       if (ext == 'pdf') {
         setState(() {
           _attachmentName = file.name;
@@ -511,7 +583,11 @@ class _ChatScreenState extends State<ChatScreen> {
           _attachmentAction = 'analyze';
         });
       } else {
-        final content = utf8.decode(bytes, allowMalformed: true);
+        final content = utf8.decode(
+          bytes,
+          allowMalformed: true,
+        );
+
         setState(() {
           _attachmentName = file.name;
           _attachmentMime = 'text/plain';
@@ -531,22 +607,42 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['mp4', 'mov', 'webm', 'avi', 'mkv'],
+        allowedExtensions: [
+          'mp4',
+          'mov',
+          'webm',
+          'avi',
+          'mkv',
+        ],
         withData: true,
       );
+
       if (result == null || result.files.isEmpty) return;
+
       final file = result.files.single;
       final bytes = file.bytes;
+
       if (bytes == null) {
         _showSnack('Ba a iya karanta video ɗin ba.');
         return;
       }
+
       if (bytes.length > 16 * 1024 * 1024) {
         _showSnack('Video ya wuce 16 MB. Zaɓi ƙarami.');
         return;
       }
+
       final ext = (file.extension ?? 'mp4').toLowerCase();
-      final mime = {'mp4':'video/mp4','mov':'video/quicktime','webm':'video/webm','avi':'video/x-msvideo','mkv':'video/x-matroska'}[ext] ?? 'video/mp4';
+
+      final mime = {
+            'mp4': 'video/mp4',
+            'mov': 'video/quicktime',
+            'webm': 'video/webm',
+            'avi': 'video/x-msvideo',
+            'mkv': 'video/x-matroska',
+          }[ext] ??
+          'video/mp4';
+
       setState(() {
         _attachmentName = file.name;
         _attachmentMime = mime;
@@ -561,27 +657,56 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _runImageAction({required bool generate}) async {
+  Future<void> _runImageAction({
+    required bool generate,
+  }) async {
     if (_isLoading) return;
+
     final prompt = _controller.text.trim();
+
     if (prompt.isEmpty) {
-      _showSnack(generate ? 'Rubuta bayanin hoton da kake so.' : 'Bayyana yadda kake son a gyara hoton.');
+      _showSnack(
+        generate
+            ? 'Rubuta bayanin hoton da kake so.'
+            : 'Bayyana yadda kake son a gyara hoton.',
+      );
       return;
     }
-    if (!generate && (_attachmentBase64 == null || !(_attachmentMime?.startsWith('image/') ?? false))) {
+
+    if (!generate &&
+        (_attachmentBase64 == null ||
+            !(_attachmentMime?.startsWith('image/') ?? false))) {
       _showSnack('Da farko zaɓi hoton da kake son gyarawa.');
       return;
     }
-    final endpoint = generate ? '/chat/image-generate' : '/chat/image-edit';
-    final url = Uri.parse('https://mafix-ai-backend.idrisatijjani9.workers.dev$endpoint');
+
+    final endpoint = generate
+        ? '/chat/image-generate'
+        : '/chat/image-edit';
+
+    final url = Uri.parse('$_baseUrl$endpoint');
+
     final assistantIndex = _messages.length + 1;
+
     String? imageB64 = _attachmentBase64;
     String? imageMime = _attachmentMime;
+
     if (!generate && imageB64 != null) {
       try {
-        final decoded = img.decodeImage(base64Decode(imageB64));
-        if (decoded == null) throw Exception('Ba a iya karanta hoton ba.');
-        final resized = img.copyResize(decoded, width: decoded.width >= decoded.height ? 511 : null, height: decoded.height > decoded.width ? 511 : null);
+        final decoded = img.decodeImage(
+          base64Decode(imageB64),
+        );
+
+        if (decoded == null) {
+          throw Exception('Ba a iya karanta hoton ba.');
+        }
+
+        final resized = img.copyResize(
+          decoded,
+          width: decoded.width >= decoded.height ? 511 : null,
+          height: decoded.height > decoded.width ? 511 : null,
+        );
+
         imageB64 = base64Encode(img.encodePng(resized));
         imageMime = 'image/png';
       } catch (e) {
@@ -589,42 +714,132 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
     }
+
     final imageFileName = _attachmentName;
+
     setState(() {
-      _messages.add(_ChatMessage(text: prompt, isUser: true));
-      _messages.add(_ChatMessage(text: generate ? 'Mafix AI is creating your image…' : 'Mafix AI is editing your image…', isUser: false));
+      _messages.add(
+        _ChatMessage(
+          text: prompt,
+          isUser: true,
+        ),
+      );
+
+      _messages.add(
+        _ChatMessage(
+          text: generate
+              ? 'Mafix AI is creating your image…'
+              : 'Mafix AI is editing your image…',
+          isUser: false,
+        ),
+      );
+
       _controller.clear();
       _isLoading = true;
-      _generationStatus = generate ? 'creating_image' : 'editing_image';
+
+      _generationStatus = generate
+          ? 'creating_image'
+          : 'editing_image';
+
       _clearAttachmentFields();
     });
+
     _scrollToBottom();
+
     try {
-      final response = await http.post(url,
-        headers: {'Content-Type':'application/json'},
-        body: jsonEncode({'prompt':prompt,'message':prompt,'image_base64':imageB64,'file_base64':imageB64,'mime_type':imageMime,'file_name':imageFileName,'mode':_selectedMode}),
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'prompt': prompt,
+          'message': prompt,
+          'image_base64': imageB64,
+          'file_base64': imageB64,
+          'mime_type': imageMime,
+          'file_name': imageFileName,
+          'mode': _selectedMode,
+        }),
       ).timeout(const Duration(seconds: 180));
-      final dynamic data = jsonDecode(response.body);
-      if (response.statusCode != 200 || data is! Map) throw Exception(data is Map ? data['error'] ?? 'Image request failed' : 'HTTP ${response.statusCode}');
-      final reply = (data['reply'] ?? data['message'] ?? (generate ? 'Image created.' : 'Image edited.')).toString();
-      final out = data['image_base64'] ?? data['image'] ?? data['output_base64'];
-      final clean = out is String ? out.replaceFirst(RegExp(r'^data:image/[^;]+;base64,'), '') : null;
+
+      dynamic data;
+
+      try {
+        data = jsonDecode(response.body);
+      } catch (_) {
+        throw Exception('Invalid response from image server.');
+      }
+
+      if (response.statusCode != 200 || data is! Map) {
+        throw Exception(
+          data is Map
+              ? data['error'] ?? 'Image request failed'
+              : 'HTTP ${response.statusCode}',
+        );
+      }
+
+      final reply = (
+        data['reply'] ??
+        data['message'] ??
+        (generate ? 'Image created.' : 'Image edited.')
+      ).toString();
+
+      final out = data['image_base64'] ??
+          data['image'] ??
+          data['output_base64'];
+
+      final clean = out is String
+          ? out.replaceFirst(
+              RegExp(r'^data:image/[^;]+;base64,'),
+              '',
+            )
+          : null;
+
       if (!mounted) return;
+
       setState(() {
-        _messages[assistantIndex] = _ChatMessage(text: reply, isUser: false, imageBase64: clean,
-          imageMime: (data['image_mime_type'] ?? data['mime_type'] ?? 'image/png').toString());
+        _messages[assistantIndex] = _ChatMessage(
+          text: reply,
+          isUser: false,
+          imageBase64: clean,
+          imageMime: (
+            data['image_mime_type'] ??
+            data['mime_type'] ??
+            'image/png'
+          ).toString(),
+        );
       });
+
       await _saveConversation();
     } catch (e) {
-      if (mounted) setState(() => _messages[assistantIndex] = _ChatMessage(text: 'An samu matsala wajen ${generate ? 'ƙirƙirar' : 'gyaran'} hoto: $e', isUser:false, isError:true));
+      if (mounted) {
+        setState(() {
+          _messages[assistantIndex] = _ChatMessage(
+            text:
+                'An samu matsala wajen ${generate ? 'ƙirƙirar' : 'gyaran'} hoto: $e',
+            isUser: false,
+            isError: true,
+          );
+        });
+      }
     } finally {
-      if (mounted) setState(() { _isLoading = false; _generationStatus = 'thinking'; });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _generationStatus = 'thinking';
+        });
+      }
     }
   }
 
   void _clearAttachmentFields() {
-    _attachmentName = null; _attachmentMime = null; _attachmentBase64 = null;
-    _attachmentText = null; _attachmentPreviewBytes = null; _attachmentIsVideo = false;
+    _attachmentName = null;
+    _attachmentMime = null;
+    _attachmentBase64 = null;
+    _attachmentText = null;
+    _attachmentPreviewBytes = null;
+    _attachmentIsVideo = false;
     _attachmentAction = 'analyze';
   }
 
@@ -634,11 +849,26 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  Future<void> _sendAttachmentMessage(String prompt, int assistantIndex, String fileName, String? mimeType, String? fileBase64, String? fileText) async {
-    final uri = Uri.parse('https://mafix-ai-backend.idrisatijjani9.workers.dev${mimeType?.startsWith('video/') == true ? '/chat/video' : '/chat/attachment'}');
+  Future<void> _sendAttachmentMessage(
+    String prompt,
+    int assistantIndex,
+    String fileName,
+    String? mimeType,
+    String? fileBase64,
+    String? fileText,
+  ) async {
+    final endpoint =
+        mimeType?.startsWith('video/') == true
+            ? '/chat/video'
+            : '/chat/attachment';
+
+    final uri = Uri.parse('$_baseUrl$endpoint');
+
     final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: jsonEncode({
         'message': prompt,
         'file_name': fileName,
@@ -649,71 +879,148 @@ class _ChatScreenState extends State<ChatScreen> {
         'prompt': prompt,
       }),
     ).timeout(const Duration(seconds: 90));
+
     dynamic data;
-    try { data = jsonDecode(response.body); } catch (_) {}
-    if (response.statusCode != 200 || data is! Map || data['reply'] == null) {
-      throw Exception(data is Map ? data['error'] ?? 'Attachment analysis failed' : 'HTTP ${response.statusCode}');
+
+    try {
+      data = jsonDecode(response.body);
+    } catch (_) {}
+
+    if (response.statusCode != 200 ||
+        data is! Map ||
+        data['reply'] == null) {
+      throw Exception(
+        data is Map
+            ? data['error'] ?? 'Attachment analysis failed'
+            : 'HTTP ${response.statusCode}',
+      );
     }
+
     if (!mounted) return;
+
     setState(() {
-      _messages[assistantIndex] = _ChatMessage(text: data['reply'].toString(), isUser: false);
+      _messages[assistantIndex] = _ChatMessage(
+        text: data['reply'].toString(),
+        isUser: false,
+      );
     });
+
     await _saveConversation();
   }
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
-    if ((text.isEmpty && _attachmentName == null) || _isLoading) return;
+
+    if ((text.isEmpty && _attachmentName == null) || _isLoading) {
+      return;
+    }
+
     final attachmentName = _attachmentName;
     final attachmentMime = _attachmentMime;
     final attachmentBase64 = _attachmentBase64;
     final attachmentText = _attachmentText;
     final attachmentAction = _attachmentAction;
-    final prompt = text.isEmpty ? 'Please analyze the attached file.' : text;
+
+    final prompt = text.isEmpty
+        ? 'Please analyze the attached file.'
+        : text;
 
     final previousMessages = List<_ChatMessage>.from(_messages);
-    final requestId = DateTime.now().microsecondsSinceEpoch.toString();
+
+    final requestId =
+        DateTime.now().microsecondsSinceEpoch.toString();
+
     final assistantIndex = _messages.length + 1;
 
+    _manuallyStopped = false;
+
     setState(() {
-      _messages.add(_ChatMessage(text: attachmentName == null ? prompt : '$prompt\n\n📎 $attachmentName', isUser: true));
-      _messages.add(const _ChatMessage(text: '', isUser: false));
+      _messages.add(
+        _ChatMessage(
+          text: attachmentName == null
+              ? prompt
+              : '$prompt\n\n📎 $attachmentName',
+          isUser: true,
+        ),
+      );
+
+      _messages.add(
+        const _ChatMessage(
+          text: '',
+          isUser: false,
+        ),
+      );
+
       _controller.clear();
+
       _clearAttachmentFields();
+
       _isLoading = true;
       _generationStatus = 'thinking';
       _activeRequestId = requestId;
     });
+
     FocusScope.of(context).unfocus();
     _scrollToBottom();
+
     await _saveConversation();
 
     final client = http.Client();
+
     _streamClient = client;
+
     var receivedToken = false;
     var streamCompleted = false;
 
     void updateAssistant(String chunk) {
       if (!mounted || assistantIndex >= _messages.length) return;
+
       final old = _messages[assistantIndex];
+
       _messages[assistantIndex] = _ChatMessage(
         text: old.text + chunk,
         isUser: false,
       );
+
       setState(() {});
+
       _scrollToBottom();
     }
 
     try {
-      if (attachmentAction == 'video' && attachmentName != null) {
-        await _sendAttachmentMessage(prompt.isEmpty ? 'Summarize this video and let me ask questions about its contents and timestamps.' : prompt, assistantIndex, attachmentName, attachmentMime, attachmentBase64, attachmentText);
+      if (attachmentAction == 'video' &&
+          attachmentName != null) {
+        await _sendAttachmentMessage(
+          prompt.isEmpty
+              ? 'Summarize this video and let me ask questions about its contents and timestamps.'
+              : prompt,
+          assistantIndex,
+          attachmentName,
+          attachmentMime,
+          attachmentBase64,
+          attachmentText,
+        );
+
         return;
       }
+
       if (attachmentName != null) {
-        await _sendAttachmentMessage(prompt, assistantIndex, attachmentName, attachmentMime, attachmentBase64, attachmentText);
+        await _sendAttachmentMessage(
+          prompt,
+          assistantIndex,
+          attachmentName,
+          attachmentMime,
+          attachmentBase64,
+          attachmentText,
+        );
+
         return;
       }
-      final request = http.Request('POST', Uri.parse(_streamUrl))
+
+      final request = http.Request(
+        'POST',
+        Uri.parse(_streamUrl),
+      )
         ..headers.addAll({
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
@@ -735,93 +1042,147 @@ class _ChatScreenState extends State<ChatScreen> {
       final response = await client.send(request).timeout(
         const Duration(seconds: 75),
       );
+
       if (response.statusCode != 200) {
         final errorBody = await response.stream.bytesToString();
+
         dynamic decoded;
-        try { decoded = jsonDecode(errorBody); } catch (_) {}
-        throw Exception(decoded is Map
-            ? decoded['error'] ?? 'HTTP ${response.statusCode}'
-            : 'HTTP ${response.statusCode}');
+
+        try {
+          decoded = jsonDecode(errorBody);
+        } catch (_) {}
+
+        throw Exception(
+          decoded is Map
+              ? decoded['error'] ?? 'HTTP ${response.statusCode}'
+              : 'HTTP ${response.statusCode}',
+        );
       }
 
       var buffer = '';
 
+      // FIXED SSE EVENT PARSER
       void processSseEvent(String event) {
         for (final line in event.split('\n')) {
           if (!line.startsWith('data:')) continue;
+
           final raw = line.substring(5).trim();
+
           if (raw.isEmpty || raw == '[DONE]') continue;
 
           dynamic payload;
+
           try {
             payload = jsonDecode(raw);
           } catch (_) {
             continue;
           }
+
           if (payload is! Map) continue;
 
           switch (payload['type']) {
             case 'status':
               if (mounted) {
-                setState(() => _generationStatus =
-                    payload['status']?.toString() ?? 'thinking');
+                setState(() {
+                  _generationStatus =
+                      payload['status']?.toString() ?? 'thinking';
+                });
               }
               break;
+
             case 'token':
               final token = payload['text']?.toString() ?? '';
+
               if (token.isNotEmpty) {
                 receivedToken = true;
                 updateAssistant(token);
               }
               break;
+
             case 'error':
-              throw Exception(payload['error'] ?? 'AI stream failed');
-             case 'done':
-             case 'stopped':
-               streamCompleted = true;
-              // Handle image generation response
+              throw Exception(
+                payload['error'] ?? 'AI stream failed',
+              );
+
+            case 'done':
+            case 'stopped':
+              streamCompleted = true;
+
+              // Handle image generation response.
               if (payload['image_base64'] != null) {
                 receivedToken = true;
-                final imageB64 = payload['image_base64'].toString();
-                final answer = payload['answer']?.toString() ?? 'Here is the image you requested.';
-                final mimeType = payload['mime_type']?.toString() ?? payload['image_mime_type']?.toString() ?? 'image/png';
-                if (mounted && assistantIndex < _messages.length) {
-                  setState(() {
-                  _messages[assistantIndex] = _ChatMessage(
-             text: answer,
-          isUser: false,
-          imageBase64: imageB64,
-          imageMime: mimeType,
-        );
-      });
-      _scrollToBottom();
-    }
-  } else if (payload['answer'] != null && payload['answer'].toString().isNotEmpty) {
-    receivedToken = true;
-    updateAssistant(payload['answer'].toString());
-  }
-  break;
 
-      await for (final bytes in response.stream.transform(utf8.decoder)) {
+                final imageB64 =
+                    payload['image_base64'].toString();
+
+                final answer =
+                    payload['answer']?.toString() ??
+                    'Here is the image you requested.';
+
+                final mimeType =
+                    payload['mime_type']?.toString() ??
+                    payload['image_mime_type']?.toString() ??
+                    'image/png';
+
+                if (mounted &&
+                    assistantIndex < _messages.length) {
+                  setState(() {
+                    _messages[assistantIndex] = _ChatMessage(
+                      text: answer,
+                      isUser: false,
+                      imageBase64: imageB64,
+                      imageMime: mimeType,
+                    );
+                  });
+
+                  _scrollToBottom();
+                }
+              } else if (payload['answer'] != null &&
+                  payload['answer'].toString().isNotEmpty) {
+                receivedToken = true;
+
+                updateAssistant(
+                  payload['answer'].toString(),
+                );
+              }
+
+              break;
+          }
+        }
+      }
+
+      // Read the server stream.
+      await for (final bytes
+          in response.stream.transform(utf8.decoder)) {
         buffer += bytes.replaceAll('\r\n', '\n');
+
         while (buffer.contains('\n\n')) {
           final boundary = buffer.indexOf('\n\n');
+
           final event = buffer.substring(0, boundary);
+
           buffer = buffer.substring(boundary + 2);
+
           processSseEvent(event);
         }
       }
-      // Some servers close the stream without a final blank-line delimiter.
-      if (buffer.trim().isNotEmpty) processSseEvent(buffer);
 
-      if (!receivedToken) {
-        throw Exception(streamCompleted
-            ? 'AI returned an empty response.'
-            : 'The connection ended before Mafix AI replied.');
+      // Process remaining data if stream closes without delimiter.
+      if (buffer.trim().isNotEmpty) {
+        processSseEvent(buffer);
       }
+
+      if (!receivedToken && !_manuallyStopped) {
+        throw Exception(
+          streamCompleted
+              ? 'AI returned an empty response.'
+              : 'The connection ended before Mafix AI replied.',
+        );
+      }
+
       await _saveConversation();
     } catch (e) {
-      if (mounted && !receivedToken) {
+      if (mounted && !_manuallyStopped && !receivedToken) {
         setState(() {
           if (assistantIndex < _messages.length) {
             _messages[assistantIndex] = _ChatMessage(
@@ -831,18 +1192,28 @@ class _ChatScreenState extends State<ChatScreen> {
             );
           }
         });
-      } else if (mounted && receivedToken) {
-        _showSnack('Connection ended. The received answer was kept.');
+      } else if (mounted &&
+          !_manuallyStopped &&
+          receivedToken) {
+        _showSnack(
+          'Connection ended. The received answer was kept.',
+        );
       }
     } finally {
       client.close();
-      if (identical(_streamClient, client)) _streamClient = null;
+
+      if (identical(_streamClient, client)) {
+        _streamClient = null;
+      }
+
       if (mounted) {
         setState(() {
           _isLoading = false;
           _activeRequestId = '';
         });
+
         _scrollToBottom();
+
         await _saveConversation();
       }
     }
@@ -850,24 +1221,55 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String _normalizeMode(String value) {
     final mode = value.toLowerCase().trim();
-    if (mode == 'deep research' || mode == 'deep_research') return 'deep research';
+
+    if (mode == 'deep research' ||
+        mode == 'deep_research') {
+      return 'deep research';
+    }
+
     if (mode == 'web search') return 'research';
-    if (['thinking', 'analyze', 'research', 'study', 'coding'].contains(mode)) return mode;
+
+    if ([
+      'thinking',
+      'analyze',
+      'research',
+      'study',
+      'coding',
+    ].contains(mode)) {
+      return mode;
+    }
+
     return 'instant';
   }
 
-  Future<void> _downloadGeneratedImage(_ChatMessage message) async {
+  Future<void> _downloadGeneratedImage(
+    _ChatMessage message,
+  ) async {
     if (message.imageBase64 == null) return;
+
     try {
       final bytes = base64Decode(message.imageBase64!);
-      final mime = (message.imageMime ?? 'image/png').toLowerCase();
-      final ext = mime.contains('jpeg') || mime.contains('jpg') ? 'jpg' : mime.contains('webp') ? 'webp' : 'png';
+
+      final mime =
+          (message.imageMime ?? 'image/png').toLowerCase();
+
+      final ext = mime.contains('jpeg') || mime.contains('jpg')
+          ? 'jpg'
+          : mime.contains('webp')
+              ? 'webp'
+              : 'png';
+
       await FileSaver.instance.saveFile(
         name: 'mafix_ai_${DateTime.now().millisecondsSinceEpoch}',
         bytes: bytes,
         fileExtension: ext,
-        mimeType: mime.contains('jpeg') ? MimeType.jpeg : mime.contains('webp') ? MimeType.webp : MimeType.png,
+        mimeType: mime.contains('jpeg')
+            ? MimeType.jpeg
+            : mime.contains('webp')
+                ? MimeType.webp
+                : MimeType.png,
       );
+
       _showSnack('An adana hoton cikin na’urar ka.');
     } catch (e) {
       _showSnack('An kasa sauke hoton: $e');
@@ -875,7 +1277,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _copyMessage(String text) async {
-    await Clipboard.setData(ClipboardData(text: text));
+    await Clipboard.setData(
+      ClipboardData(text: text),
+    );
+
     _showSnack('Copied to clipboard');
   }
 
@@ -892,13 +1297,26 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String _statusLabel(String status) {
     switch (status) {
-      case 'creating_image': return 'Mafix AI is creating an image…';
-      case 'editing_image': return 'Mafix AI is editing your image…';
-      case 'searching': return 'Searching the web...';
-      case 'analyzing': return 'Analyzing information...';
-      case 'preparing_answer': return 'Preparing answer...';
-      case 'stopped': return 'Generation stopped';
-      default: return 'Mafix AI is thinking...';
+      case 'creating_image':
+        return 'Mafix AI is creating an image…';
+
+      case 'editing_image':
+        return 'Mafix AI is editing your image…';
+
+      case 'searching':
+        return 'Searching the web...';
+
+      case 'analyzing':
+        return 'Analyzing information...';
+
+      case 'preparing_answer':
+        return 'Preparing answer...';
+
+      case 'stopped':
+        return 'Generation stopped';
+
+      default:
+        return 'Mafix AI is thinking...';
     }
   }
 
@@ -937,7 +1355,9 @@ class _ChatScreenState extends State<ChatScreen> {
     Navigator.pop(context);
 
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => page),
+      MaterialPageRoute(
+        builder: (_) => page,
+      ),
     );
   }
 
@@ -1027,29 +1447,39 @@ class _ChatScreenState extends State<ChatScreen> {
             ListTile(
               leading: const Icon(Icons.graphic_eq_rounded),
               title: const Text('Voice conversation'),
-              onTap: () => _openPage(const VoiceChatScreen()),
+              onTap: () => _openPage(
+                const VoiceChatScreen(),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.person_outline),
               title: const Text('Profile'),
-              onTap: () => _openPage(const ProfileScreen()),
+              onTap: () => _openPage(
+                const ProfileScreen(),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.settings_outlined),
               title: const Text('Settings'),
-              onTap: () => _openPage(const SettingsScreen()),
+              onTap: () => _openPage(
+                const SettingsScreen(),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.workspace_premium_outlined),
               title: const Text('Upgrade to Pro'),
-              onTap: () => _openPage(const SubscriptionScreen()),
+              onTap: () => _openPage(
+                const SubscriptionScreen(),
+              ),
             ),
             const Spacer(),
             const Divider(color: Colors.white12),
             ListTile(
               leading: const Icon(Icons.login_rounded),
               title: const Text('Login / Register'),
-              onTap: () => _openPage(const AuthScreen()),
+              onTap: () => _openPage(
+                const AuthScreen(),
+              ),
             ),
             const Padding(
               padding: EdgeInsets.all(16),
@@ -1130,15 +1560,38 @@ class _ChatScreenState extends State<ChatScreen> {
           PopupMenuButton<String>(
             tooltip: 'Choose response mode',
             initialValue: _selectedMode,
-            onSelected: (value) => setState(() => _selectedMode = value),
+            onSelected: (value) {
+              setState(() => _selectedMode = value);
+            },
             itemBuilder: (context) => const [
-              PopupMenuItem(value: 'instant', child: Text('Instant')),
-              PopupMenuItem(value: 'thinking', child: Text('Thinking')),
-              PopupMenuItem(value: 'analyze', child: Text('Analyze')),
-              PopupMenuItem(value: 'research', child: Text('Web research')),
-              PopupMenuItem(value: 'deep research', child: Text('Deep research')),
-              PopupMenuItem(value: 'study', child: Text('Study mode')),
-              PopupMenuItem(value: 'coding', child: Text('Coding mode')),
+              PopupMenuItem(
+                value: 'instant',
+                child: Text('Instant'),
+              ),
+              PopupMenuItem(
+                value: 'thinking',
+                child: Text('Thinking'),
+              ),
+              PopupMenuItem(
+                value: 'analyze',
+                child: Text('Analyze'),
+              ),
+              PopupMenuItem(
+                value: 'research',
+                child: Text('Web research'),
+              ),
+              PopupMenuItem(
+                value: 'deep research',
+                child: Text('Deep research'),
+              ),
+              PopupMenuItem(
+                value: 'study',
+                child: Text('Study mode'),
+              ),
+              PopupMenuItem(
+                value: 'coding',
+                child: Text('Coding mode'),
+              ),
             ],
             child: const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),
@@ -1158,13 +1611,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           IconButton(
             tooltip: 'Voice conversation',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const VoiceChatScreen(),
-                ),
-              );
-            },
+            onPressed: _openVoiceConversation,
             icon: const Icon(Icons.graphic_eq_rounded),
           ),
           IconButton(
@@ -1276,7 +1723,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       padding: const EdgeInsets.all(16),
                       itemCount: _messages.length + (_isLoading ? 1 : 0),
                       itemBuilder: (context, index) {
-                        if (_isLoading && index == _messages.length) {
+                        if (_isLoading &&
+                            index == _messages.length) {
                           return Align(
                             alignment: Alignment.centerLeft,
                             child: Padding(
@@ -1284,17 +1732,19 @@ class _ChatScreenState extends State<ChatScreen> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  SizedBox(
+                                  const SizedBox(
                                     width: 18,
                                     height: 18,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
                                     ),
                                   ),
-                                  SizedBox(width: 12),
+                                  const SizedBox(width: 12),
                                   Text(
                                     _statusLabel(_generationStatus),
-                                    style: const TextStyle(color: Colors.white70),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
                                   ),
                                   const SizedBox(width: 8),
                                   TextButton(
@@ -1333,7 +1783,17 @@ class _ChatScreenState extends State<ChatScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                if (message.imageBase64 != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.memory(base64Decode(message.imageBase64!), fit: BoxFit.contain))),
+                                if (message.imageBase64 != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.memory(
+                                        base64Decode(message.imageBase64!),
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ),
                                 SelectableText(
                                   message.text,
                                   style: TextStyle(
@@ -1343,24 +1803,50 @@ class _ChatScreenState extends State<ChatScreen> {
                                         : Colors.white,
                                   ),
                                 ),
-                                if (!message.isUser && !message.isError && message.text.isNotEmpty)
+                                if (!message.isUser &&
+                                    !message.isError &&
+                                    message.text.isNotEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 6),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         IconButton(
-                                          visualDensity: VisualDensity.compact,
+                                          visualDensity:
+                                              VisualDensity.compact,
                                           tooltip: 'Copy answer',
-                                          onPressed: () => _copyMessage(message.text),
-                                          icon: const Icon(Icons.copy_rounded, size: 17, color: Colors.white60),
+                                          onPressed: () =>
+                                              _copyMessage(message.text),
+                                          icon: const Icon(
+                                            Icons.copy_rounded,
+                                            size: 17,
+                                            color: Colors.white60,
+                                          ),
                                         ),
-                                        if (message.imageBase64 != null) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Download image', onPressed: () => _downloadGeneratedImage(message), icon: const Icon(Icons.download_rounded, size: 19, color: Colors.white60)),
+                                        if (message.imageBase64 != null)
+                                          IconButton(
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            tooltip: 'Download image',
+                                            onPressed: () =>
+                                                _downloadGeneratedImage(message),
+                                            icon: const Icon(
+                                              Icons.download_rounded,
+                                              size: 19,
+                                              color: Colors.white60,
+                                            ),
+                                          ),
                                         IconButton(
-                                          visualDensity: VisualDensity.compact,
+                                          visualDensity:
+                                              VisualDensity.compact,
                                           tooltip: 'Read aloud',
-                                          onPressed: () => _readMessageAloud(message.text),
-                                          icon: const Icon(Icons.volume_up_outlined, size: 19, color: Colors.white60),
+                                          onPressed: () =>
+                                              _readMessageAloud(message.text),
+                                          icon: const Icon(
+                                            Icons.volume_up_outlined,
+                                            size: 19,
+                                            color: Colors.white60,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -1372,21 +1858,64 @@ class _ChatScreenState extends State<ChatScreen> {
                       },
                     ),
             ),
+
             if (_attachmentName != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 4, 14, 6),
-                child: Row(children: [
-                  if (_attachmentPreviewBytes != null)
-                    ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(_attachmentPreviewBytes!, width: 64, height: 54, fit: BoxFit.cover))
-                  else Icon(_attachmentIsVideo ? Icons.video_file_outlined : Icons.attach_file, color: const Color(0xFF39DDFF), size: 28),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(_attachmentName!, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70))),
-                  if (!_attachmentIsVideo && (_attachmentMime?.startsWith('image/') ?? false)) ...[
-                    IconButton(tooltip: 'Edit image', onPressed: () => _runImageAction(generate: false), icon: const Icon(Icons.auto_fix_high, color: Color(0xFF39DDFF))),
+                child: Row(
+                  children: [
+                    if (_attachmentPreviewBytes != null)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(
+                          _attachmentPreviewBytes!,
+                          width: 64,
+                          height: 54,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    else
+                      Icon(
+                        _attachmentIsVideo
+                            ? Icons.video_file_outlined
+                            : Icons.attach_file,
+                        color: const Color(0xFF39DDFF),
+                        size: 28,
+                      ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _attachmentName!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ),
+                    if (!_attachmentIsVideo &&
+                        (_attachmentMime?.startsWith('image/') ?? false))
+                      IconButton(
+                        tooltip: 'Edit image',
+                        onPressed: () =>
+                            _runImageAction(generate: false),
+                        icon: const Icon(
+                          Icons.auto_fix_high,
+                          color: Color(0xFF39DDFF),
+                        ),
+                      ),
+                    IconButton(
+                      onPressed: _clearAttachment,
+                      icon: const Icon(
+                        Icons.close,
+                        color: Colors.white70,
+                        size: 18,
+                      ),
+                    ),
                   ],
-                  IconButton(onPressed: _clearAttachment, icon: const Icon(Icons.close, color: Colors.white70, size: 18)),
-                ]),
+                ),
               ),
+
             Container(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               decoration: const BoxDecoration(
@@ -1404,39 +1933,79 @@ class _ChatScreenState extends State<ChatScreen> {
                       context: context,
                       backgroundColor: const Color(0xFF171D42),
                       builder: (sheetContext) => SafeArea(
-                        child: Wrap(children: [
-                          ListTile(
-                            leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF39DDFF)),
-                            title: const Text('Take a photo'),
-                            onTap: () { Navigator.pop(sheetContext); _pickImage(ImageSource.camera); },
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.image_outlined, color: Color(0xFF39DDFF)),
-                            title: const Text('Choose image'),
-                            onTap: () { Navigator.pop(sheetContext); _pickImage(ImageSource.gallery); },
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.video_library_outlined, color: Color(0xFF39DDFF)),
-                            title: const Text('Choose video'),
-                            subtitle: const Text('Analyze, summarize, and ask about timestamps (max 16 MB)'),
-                            onTap: () { Navigator.pop(sheetContext); _pickVideo(); },
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.auto_awesome, color: Color(0xFF39DDFF)),
-                            title: const Text('Generate a new image'),
-                            subtitle: const Text('Describe the image in the message box first'),
-                            onTap: () { Navigator.pop(sheetContext); _runImageAction(generate: true); },
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.picture_as_pdf_outlined, color: Color(0xFF39DDFF)),
-                            title: const Text('Choose PDF or text file'),
-                            subtitle: const Text('PDF, TXT, MD, CSV'),
-                            onTap: () { Navigator.pop(sheetContext); _pickDocument(); },
-                          ),
-                        ]),
+                        child: Wrap(
+                          children: [
+                            ListTile(
+                              leading: const Icon(
+                                Icons.photo_camera_outlined,
+                                color: Color(0xFF39DDFF),
+                              ),
+                              title: const Text('Take a photo'),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                _pickImage(ImageSource.camera);
+                              },
+                            ),
+                            ListTile(
+                              leading: const Icon(
+                                Icons.image_outlined,
+                                color: Color(0xFF39DDFF),
+                              ),
+                              title: const Text('Choose image'),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                _pickImage(ImageSource.gallery);
+                              },
+                            ),
+                            ListTile(
+                              leading: const Icon(
+                                Icons.video_library_outlined,
+                                color: Color(0xFF39DDFF),
+                              ),
+                              title: const Text('Choose video'),
+                              subtitle: const Text(
+                                'Analyze, summarize, and ask about timestamps (max 16 MB)',
+                              ),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                _pickVideo();
+                              },
+                            ),
+                            ListTile(
+                              leading: const Icon(
+                                Icons.auto_awesome,
+                                color: Color(0xFF39DDFF),
+                              ),
+                              title: const Text('Generate a new image'),
+                              subtitle: const Text(
+                                'Describe the image in the message box first',
+                              ),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                _runImageAction(generate: true);
+                              },
+                            ),
+                            ListTile(
+                              leading: const Icon(
+                                Icons.picture_as_pdf_outlined,
+                                color: Color(0xFF39DDFF),
+                              ),
+                              title: const Text('Choose PDF or text file'),
+                              subtitle: const Text('PDF, TXT, MD, CSV'),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                _pickDocument();
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    icon: const Icon(Icons.add_circle_outline, color: Color(0xFF39DDFF), size: 27),
+                    icon: const Icon(
+                      Icons.add_circle_outline,
+                      color: Color(0xFF39DDFF),
+                      size: 27,
+                    ),
                   ),
                   Expanded(
                     child: TextField(
@@ -1462,21 +2031,34 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   const SizedBox(width: 2),
                   IconButton(
-                    tooltip: _isListening ? 'Stop speech-to-text' : 'Speech-to-text',
-                    onPressed: _isLoading ? null : _toggleSpeechToText,
+                    tooltip: _isListening
+                        ? 'Stop speech-to-text'
+                        : 'Speech-to-text',
+                    onPressed:
+                        _isLoading ? null : _toggleSpeechToText,
                     icon: Icon(
-                      _isListening ? Icons.stop_circle : Icons.mic_none_rounded,
-                      color: _isListening ? Colors.redAccent : const Color(0xFF39DDFF),
+                      _isListening
+                          ? Icons.stop_circle
+                          : Icons.mic_none_rounded,
+                      color: _isListening
+                          ? Colors.redAccent
+                          : const Color(0xFF39DDFF),
                     ),
                   ),
                   IconButton(
                     tooltip: 'Live voice conversation',
-                    onPressed: _isLoading ? null : _openVoiceConversation,
-                    icon: const Icon(Icons.graphic_eq_rounded, color: Color(0xFF39DDFF)),
+                    onPressed:
+                        _isLoading ? null : _openVoiceConversation,
+                    icon: const Icon(
+                      Icons.graphic_eq_rounded,
+                      color: Color(0xFF39DDFF),
+                    ),
                   ),
                   IconButton.filled(
                     tooltip: 'Send message',
-                    onPressed: _isLoading || (_controller.text.trim().isEmpty && _attachmentName == null)
+                    onPressed: _isLoading ||
+                            (_controller.text.trim().isEmpty &&
+                                _attachmentName == null)
                         ? null
                         : _sendMessage,
                     style: IconButton.styleFrom(
