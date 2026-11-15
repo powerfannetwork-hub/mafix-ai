@@ -581,7 +581,16 @@ class _ChatScreenState extends State<ChatScreen> {
       try {
         final decoded = img.decodeImage(base64Decode(imageB64));
         if (decoded == null) throw Exception('Ba a iya karanta hoton ba.');
-        final resized = img.copyResize(decoded, width: decoded.width >= decoded.height ? 511 : null, height: decoded.height > decoded.width ? 511 : null);
+        final resized = img.copyResize(
+  decoded,
+  width: decoded.width > 512 ? 512 : decoded.width,
+  height: decoded.height > 512 ? 512 : decoded.height,
+  maintainAspect: true,
+);
+
+if (resized.width > 512 || resized.height > 512) {
+  throw Exception('Image must not exceed 512x512.');
+}
         imageB64 = base64Encode(img.encodePng(resized));
         imageMime = 'image/png';
       } catch (e) {
